@@ -608,74 +608,34 @@ export class Router {
     return new Promise((resolvePromise, rejectPromise) => {
       // create an observable of the url and route state snapshot
       // this operation do not result in any side effects
-      let urlAndSnapshot$: Observable<{appliedUrl: UrlTree, snapshot: RouterStateSnapshot}>;
+      let urlAndSnapshot$: Observable<{appliedUrl: UrlTree, snapshot: RouterStateSnapshot,
+        alternates: RouterStateSnapshot[]}>;
       if (!precreatedState) {
         const moduleInjector = this.ngModule.injector;
         const redirectsApplied$ =
             applyRedirects(moduleInjector, this.configLoader, this.urlSerializer, url, this.config);
 
         urlAndSnapshot$ = mergeMap.call(redirectsApplied$, (appliedUrl: UrlTree) => {
-          return map.call(
-              recognize(
-                  this.rootComponentType, this.config, appliedUrl, this.serializeUrl(appliedUrl)),
+          let recognizedRoutes =
+            recognize(this.rootComponentType, this.config, appliedUrl, this.serializeUrl(appliedUrl));
+          return map.call(recognizedRoutes,
               (snapshot: any) => {
-
                 this.routerEvents.next(new RoutesRecognized(
-                    id, this.serializeUrl(url), this.serializeUrl(appliedUrl), snapshot));
+                    id, this.serializeUrl(url), this.serializeUrl(appliedUrl), snapshot[0]));
 
-                return {appliedUrl, snapshot};
+                return {appliedUrl, snapshot: snapshot[0], alternates: snapshot.splice(1)};
               });
         });
       } else {
         urlAndSnapshot$ = of ({appliedUrl: url, snapshot: precreatedState});
       }
 
-      const beforePreactivationDone$ = mergeMap.call(
-          urlAndSnapshot$, (p: {appliedUrl: string, snapshot: RouterStateSnapshot}) => {
-            return map.call(this.hooks.beforePreactivation(p.snapshot), () => p);
-          });
-
-      // run preactivation: guards and data resolvers
-      let preActivation: PreActivation;
-      const preactivationTraverse$ = map.call(
-          beforePreactivationDone$,
-          ({appliedUrl, snapshot}: {appliedUrl: string, snapshot: RouterStateSnapshot}) => {
-            const moduleInjector = this.ngModule.injector;
-            preActivation =
-                new PreActivation(snapshot, this.currentRouterState.snapshot, moduleInjector);
-            preActivation.traverse(this.outletMap);
-            return {appliedUrl, snapshot};
-          });
-
-      const preactivationCheckGuards$ = mergeMap.call(
-          preactivationTraverse$,
-          ({appliedUrl, snapshot}: {appliedUrl: string, snapshot: RouterStateSnapshot}) => {
-            if (this.navigationId !== id) return of (false);
-
-            return map.call(preActivation.checkGuards(), (shouldActivate: boolean) => {
-              return {appliedUrl: appliedUrl, snapshot: snapshot, shouldActivate: shouldActivate};
-            });
-          });
-
-      const preactivationResolveData$ = mergeMap.call(preactivationCheckGuards$, (p: any) => {
-        if (this.navigationId !== id) return of (false);
-
-        if (p.shouldActivate) {
-          return map.call(preActivation.resolveData(), () => p);
-        } else {
-          return of (p);
-        }
-      });
-
-      const preactivationDone$ = mergeMap.call(preactivationResolveData$, (p: any) => {
-        return map.call(this.hooks.afterPreactivation(p.snapshot), () => p);
-      });
-
+      const accessibleRouteFound$ = this.findAccessibleRoute(id,urlAndSnapshot$); //this.executeGuard(id,urlAndSnapshot$);
 
       // create router state
       // this operation has side effects => route state is being affected
       const routerState$ =
-          map.call(preactivationDone$, ({appliedUrl, snapshot, shouldActivate}: any) => {
+          map.call(accessibleRouteFound$, ({appliedUrl, snapshot, shouldActivate}: any) => {
             if (shouldActivate) {
               const state =
                   createRouterState(this.routeReuseStrategy, snapshot, this.currentRouterState);
@@ -758,6 +718,66 @@ export class Router {
   private resetUrlToCurrentUrlTree(): void {
     const path = this.urlSerializer.serialize(this.rawUrlTree);
     this.location.replaceState(path);
+  }
+
+  private findAccessibleRoute(id: number, urlAndSnapshot$:Observable<any>) : Observable<any> {
+    return mergeMap.call(
+      this.executeGuard(id, urlAndSnapshot$),
+      ({appliedUrl, snapshot, alternates, shouldActivate}: any) => {
+        if (shouldActivate || (alternates || []).length == 0) {
+          return of({appliedUrl: appliedUrl, snapshot: snapshot, alternates: alternates, shouldActivate: shouldActivate});
+        }
+        else return this.findAccessibleRoute(id, of({
+          appliedUrl: appliedUrl, snapshot: alternates[0],
+          alternates: alternates.splice(1), shouldActivate: shouldActivate
+        }));
+      });
+  }
+
+  private executeGuard(id: number, urlAndSnapshot$:Observable<any>) : Observable<any> {
+    const beforePreactivationDone$ = mergeMap.call(
+      urlAndSnapshot$, (p: {appliedUrl: string, snapshot: RouterStateSnapshot, alternates: RouterStateSnapshot[]}) => {
+        return map.call(this.hooks.beforePreactivation(p.snapshot), () => p);
+      });
+
+    // run preactivation: guards and data resolvers
+    let preActivation: PreActivation;
+    const preactivationTraverse$ = map.call(
+      beforePreactivationDone$,
+      ({appliedUrl, snapshot, alternates}: {appliedUrl: string, snapshot: RouterStateSnapshot,
+          alternates: RouterStateSnapshot[]}) => {
+        const moduleInjector = this.ngModule.injector;
+        preActivation =
+          new PreActivation(snapshot, this.currentRouterState.snapshot, moduleInjector);
+        preActivation.traverse(this.outletMap);
+        return {appliedUrl, snapshot, alternates};
+      });
+
+    const preactivationCheckGuards$ = mergeMap.call(
+      preactivationTraverse$,
+      ({appliedUrl, snapshot, alternates}: {appliedUrl: string, snapshot: RouterStateSnapshot,
+         alternates: RouterStateSnapshot[]}) => {
+        if (this.navigationId !== id) return of (false);
+
+        return map.call(preActivation.checkGuards(), (shouldActivate: boolean) => {
+          return {appliedUrl: appliedUrl, snapshot: snapshot, alternates: alternates, shouldActivate: shouldActivate};
+        });
+      });
+
+    const preactivationResolveData$ = mergeMap.call(preactivationCheckGuards$, (p: any) => {
+      if (this.navigationId !== id) return of (false);
+
+      if (p.shouldActivate) {
+        return map.call(preActivation.resolveData(), () => p);
+      } else {
+        return of (p);
+      }
+    });
+
+    const preactivationDone$ = mergeMap.call(preactivationResolveData$, (p: any) => {
+      return map.call(this.hooks.afterPreactivation(p.snapshot), () => p);
+    });
+    return preactivationDone$;
   }
 }
 
