@@ -22,7 +22,7 @@ class NoMatch {}
 
 export function recognize(
     rootComponentType: Type<any>, config: Routes, urlTree: UrlTree,
-    url: string): Observable<RouterStateSnapshot> {
+    url: string): Observable<RouterStateSnapshot[]> {
   return new Recognizer(rootComponentType, config, urlTree, url).recognize();
 }
 
@@ -31,24 +31,34 @@ class Recognizer {
       private rootComponentType: Type<any>, private config: Routes, private urlTree: UrlTree,
       private url: string) {}
 
-  recognize(): Observable<RouterStateSnapshot> {
+  recognize(): Observable<RouterStateSnapshot[]> {
     try {
-      const rootSegmentGroup = split(this.urlTree.root, [], [], this.config).segmentGroup;
+      let recognizedRoutes: RouterStateSnapshot[] = [];
+      let config = this.config.slice(); //copy
+      do {
+        try {
+          const rootSegmentGroup = split(this.urlTree.root, [], [], config).segmentGroup;
 
-      const children = this.processSegmentGroup(this.config, rootSegmentGroup, PRIMARY_OUTLET);
+          const children = this.processSegmentGroup(config, rootSegmentGroup, PRIMARY_OUTLET);
 
-      const root = new ActivatedRouteSnapshot(
-          [], Object.freeze({}), Object.freeze(this.urlTree.queryParams), this.urlTree.fragment, {},
-          PRIMARY_OUTLET, this.rootComponentType, null, this.urlTree.root, -1, {});
+          const root = new ActivatedRouteSnapshot(
+            [], Object.freeze({}), Object.freeze(this.urlTree.queryParams), this.urlTree.fragment, {},
+            PRIMARY_OUTLET, this.rootComponentType, null, this.urlTree.root, -1, {});
 
-      const rootNode = new TreeNode<ActivatedRouteSnapshot>(root, children);
-      const routeState = new RouterStateSnapshot(this.url, rootNode);
-      this.inheriteParamsAndData(routeState._root);
-      return of (routeState);
+          const rootNode = new TreeNode<ActivatedRouteSnapshot>(root, children);
+          const routeState = new RouterStateSnapshot(this.url, rootNode);
+          this.inheriteParamsAndData(routeState._root);
+          recognizedRoutes.push(routeState);
 
+
+        }
+        catch(e) { if (!(e instanceof NoMatch)) throw e; else break; }
+      } while(true);
+
+      return of(recognizedRoutes);
     } catch (e) {
-      return new Observable<RouterStateSnapshot>(
-          (obs: Observer<RouterStateSnapshot>) => obs.error(e));
+      return new Observable<RouterStateSnapshot[]>(
+          (obs: Observer<RouterStateSnapshot[]>) => obs.error(e));
     }
   }
 
@@ -83,13 +93,16 @@ class Recognizer {
   processSegment(
       config: Route[], segmentGroup: UrlSegmentGroup, segments: UrlSegment[],
       outlet: string): TreeNode<ActivatedRouteSnapshot>[] {
-    for (const r of config) {
+    for (let i = 0; i < config.length; i++) {
       try {
-        return this.processSegmentAgainstRoute(r, segmentGroup, segments, outlet);
+        const recognizedRoute = this.processSegmentAgainstRoute(config[i], segmentGroup, segments, outlet);
+        config.splice(i,1);
+        return recognizedRoute;
       } catch (e) {
         if (!(e instanceof NoMatch)) throw e;
       }
     }
+
     if (this.noLeftoversInUrl(segmentGroup, segments, outlet)) {
       return [];
     }
