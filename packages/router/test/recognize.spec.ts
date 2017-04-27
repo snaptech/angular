@@ -51,19 +51,21 @@ describe('recognize', () => {
           {path: 'c', component: ComponentC, outlet: 'right'}
         ],
         url, 'a(left:b//right:c)')
-        .subscribe((s) => {
-          expect(s.root._urlSegment).toBe(url.root);
-          expect(s.root._lastPathIndex).toBe(-1);
+        .subscribe((s: RouterStateSnapshot[]) => {
+          s.forEach((rss:RouterStateSnapshot)=>{
+            expect(rss.root._urlSegment).toBe(url.root);
+            expect(rss.root._lastPathIndex).toBe(-1);
 
-          const c = s.children(s.root);
-          expect(c[0]._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-          expect(c[0]._lastPathIndex).toBe(0);
+            const c = rss.children(rss.root);
+            expect(c[0]._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+            expect(c[0]._lastPathIndex).toBe(0);
 
-          expect(c[1]._urlSegment).toBe(url.root.children['left']);
-          expect(c[1]._lastPathIndex).toBe(0);
+            expect(c[1]._urlSegment).toBe(url.root.children['left']);
+            expect(c[1]._lastPathIndex).toBe(0);
 
-          expect(c[2]._urlSegment).toBe(url.root.children['right']);
-          expect(c[2]._lastPathIndex).toBe(0);
+            expect(c[2]._urlSegment).toBe(url.root.children['right']);
+            expect(c[2]._lastPathIndex).toBe(0);
+          });
         });
   });
 
@@ -75,17 +77,19 @@ describe('recognize', () => {
           {path: 'a/b', component: ComponentA, children: [{path: 'c', component: ComponentC}]},
         ],
         url, 'a/b/c')
-        .subscribe((s: RouterStateSnapshot) => {
-          expect(s.root._urlSegment).toBe(url.root);
-          expect(s.root._lastPathIndex).toBe(-1);
+        .subscribe((s: RouterStateSnapshot[]) => {
+          s.forEach((rss:RouterStateSnapshot)=> {
+            expect(rss.root._urlSegment).toBe(url.root);
+            expect(rss.root._lastPathIndex).toBe(-1);
 
-          const compA = s.firstChild(s.root);
-          expect(compA._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-          expect(compA._lastPathIndex).toBe(1);
+            const compA = rss.firstChild(rss.root);
+            expect(compA._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+            expect(compA._lastPathIndex).toBe(1);
 
-          const compC = s.firstChild(<any>compA);
-          expect(compC._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-          expect(compC._lastPathIndex).toBe(2);
+            const compC = rss.firstChild(<any>compA);
+            expect(compC._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+            expect(compC._lastPathIndex).toBe(2);
+          });
         });
   });
 
@@ -97,17 +101,19 @@ describe('recognize', () => {
           {path: 'a', component: ComponentA, children: [{path: '**', component: ComponentB}]},
         ],
         url, 'a/b/c')
-        .subscribe((s: RouterStateSnapshot) => {
-          expect(s.root._urlSegment).toBe(url.root);
-          expect(s.root._lastPathIndex).toBe(-1);
+        .subscribe((s: RouterStateSnapshot[]) => {
+          s.forEach((rss:RouterStateSnapshot)=> {
+            expect(rss.root._urlSegment).toBe(url.root);
+            expect(rss.root._lastPathIndex).toBe(-1);
 
-          const compA = s.firstChild(s.root);
-          expect(compA._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-          expect(compA._lastPathIndex).toBe(0);
+            const compA = rss.firstChild(rss.root);
+            expect(compA._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+            expect(compA._lastPathIndex).toBe(0);
 
-          const compC = s.firstChild(<any>compA);
-          expect(compC._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-          expect(compC._lastPathIndex).toBe(2);
+            const compC = rss.firstChild(<any>compA);
+            expect(compC._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+            expect(compC._lastPathIndex).toBe(2);
+          });
         });
   });
 
@@ -255,17 +261,19 @@ describe('recognize', () => {
             RootComponent,
             [{path: '', component: ComponentA, children: [{path: '', component: ComponentB}]}], url,
             '')
-            .forEach((s: RouterStateSnapshot) => {
-              expect(s.root._urlSegment).toBe(url.root);
-              expect(s.root._lastPathIndex).toBe(-1);
+            .forEach((s: RouterStateSnapshot[]) => {
+              s.forEach((rss: RouterStateSnapshot)=> {
+                expect(rss.root._urlSegment).toBe(url.root);
+                expect(rss.root._lastPathIndex).toBe(-1);
 
-              const c = s.firstChild(s.root);
-              expect(c._urlSegment).toBe(url.root);
-              expect(c._lastPathIndex).toBe(-1);
+                const c = rss.firstChild(rss.root);
+                expect(c._urlSegment).toBe(url.root);
+                expect(c._lastPathIndex).toBe(-1);
 
-              const c2 = s.firstChild(<any>s.firstChild(s.root));
-              expect(c2._urlSegment).toBe(url.root);
-              expect(c2._lastPathIndex).toBe(-1);
+                const c2 = rss.firstChild(<any>rss.firstChild(rss.root));
+                expect(c2._urlSegment).toBe(url.root);
+                expect(c2._lastPathIndex).toBe(-1);
+              });
             });
       });
 
@@ -371,21 +379,23 @@ describe('recognize', () => {
               ]
             }],
             url, 'a/b')
-            .forEach((s: RouterStateSnapshot) => {
-              expect(s.root._urlSegment).toBe(url.root);
-              expect(s.root._lastPathIndex).toBe(-1);
+            .forEach((s: RouterStateSnapshot[]) => {
+              s.forEach((rss: RouterStateSnapshot) => {
+                expect(rss.root._urlSegment).toBe(url.root);
+                expect(rss.root._lastPathIndex).toBe(-1);
 
-              const a = s.firstChild(s.root);
-              expect(a._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-              expect(a._lastPathIndex).toBe(0);
+                const a = rss.firstChild(rss.root);
+                expect(a._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+                expect(a._lastPathIndex).toBe(0);
 
-              const b = s.firstChild(a);
-              expect(b._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-              expect(b._lastPathIndex).toBe(1);
+                const b = rss.firstChild(a);
+                expect(b._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+                expect(b._lastPathIndex).toBe(1);
 
-              const c = s.children(a)[1];
-              expect(c._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-              expect(c._lastPathIndex).toBe(0);
+                const c = rss.children(a)[1];
+                expect(c._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+                expect(c._lastPathIndex).toBe(0);
+              });
             });
       });
 
@@ -399,21 +409,24 @@ describe('recognize', () => {
               ]
             }],
             url, 'a')
-            .forEach((s: RouterStateSnapshot) => {
-              expect(s.root._urlSegment).toBe(url.root);
-              expect(s.root._lastPathIndex).toBe(-1);
+            .forEach((s: RouterStateSnapshot[]) => {
+              s.forEach((rss: RouterStateSnapshot) =>
+              {
+                expect(rss.root._urlSegment).toBe(url.root);
+                expect(rss.root._lastPathIndex).toBe(-1);
 
-              const a = s.firstChild(s.root);
-              expect(a._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-              expect(a._lastPathIndex).toBe(0);
+                const a = rss.firstChild(rss.root);
+                expect(a._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+                expect(a._lastPathIndex).toBe(0);
 
-              const b = s.firstChild(a);
-              expect(b._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-              expect(b._lastPathIndex).toBe(0);
+                const b = rss.firstChild(a);
+                expect(b._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+                expect(b._lastPathIndex).toBe(0);
 
-              const c = s.firstChild(b);
-              expect(c._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
-              expect(c._lastPathIndex).toBe(0);
+                const c = rss.firstChild(b);
+                expect(c._urlSegment).toBe(url.root.children[PRIMARY_OUTLET]);
+                expect(c._lastPathIndex).toBe(0);
+              });
             });
       });
 
@@ -427,21 +440,23 @@ describe('recognize', () => {
               ]
             }],
             url, '')
-            .forEach((s: RouterStateSnapshot) => {
-              expect(s.root._urlSegment).toBe(url.root);
-              expect(s.root._lastPathIndex).toBe(-1);
+            .forEach((s: RouterStateSnapshot[]) => {
+              s.forEach((rss: RouterStateSnapshot) => {
+                expect(rss.root._urlSegment).toBe(url.root);
+                expect(rss.root._lastPathIndex).toBe(-1);
 
-              const a = s.firstChild(s.root);
-              expect(a._urlSegment).toBe(url.root);
-              expect(a._lastPathIndex).toBe(-1);
+                const a = rss.firstChild(rss.root);
+                expect(a._urlSegment).toBe(url.root);
+                expect(a._lastPathIndex).toBe(-1);
 
-              const b = s.firstChild(a);
-              expect(b._urlSegment).toBe(url.root);
-              expect(b._lastPathIndex).toBe(-1);
+                const b = rss.firstChild(a);
+                expect(b._urlSegment).toBe(url.root);
+                expect(b._lastPathIndex).toBe(-1);
 
-              const c = s.firstChild(b);
-              expect(c._urlSegment).toBe(url.root);
-              expect(c._lastPathIndex).toBe(-1);
+                const c = rss.firstChild(b);
+                expect(c._urlSegment).toBe(url.root);
+                expect(c._lastPathIndex).toBe(-1);
+              });
             });
       });
     });
@@ -703,7 +718,7 @@ describe('recognize', () => {
 });
 
 function checkRecognize(config: Routes, url: string, callback: any): void {
-  recognize(RootComponent, config, tree(url), url).subscribe(callback, e => { throw e; });
+  recognize(RootComponent, config, tree(url), url).subscribe((x)=>callback(x[0]), e => { throw e; });
 }
 
 function checkActivatedRoute(

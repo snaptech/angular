@@ -13,7 +13,9 @@ import {from} from 'rxjs/observable/from';
 import {of } from 'rxjs/observable/of';
 import {_catch} from 'rxjs/operator/catch';
 import {concatAll} from 'rxjs/operator/concatAll';
+import {concat} from 'rxjs/operator/concat';
 import {first} from 'rxjs/operator/first';
+import {last} from 'rxjs/operator/last';
 import {map} from 'rxjs/operator/map';
 import {mergeMap} from 'rxjs/operator/mergeMap';
 import {EmptyError} from 'rxjs/util/EmptyError';
@@ -162,8 +164,10 @@ class ApplyRedirects {
       });
     });
     const concattedProcessedRoutes$ = concatAll.call(processedRoutes$);
+    const last$ = last.call(concattedProcessedRoutes$, (s: any) => !!s);
     const first$ = first.call(concattedProcessedRoutes$, (s: any) => !!s);
-    return _catch.call(first$, (e: any, _: any): Observable<UrlSegmentGroup> => {
+
+    return _catch.call(first.call(concat.call(last$,first$)), (e: any, _: any): Observable<UrlSegmentGroup> => {
       if (e instanceof EmptyError) {
         if (this.noLeftoversInUrl(segmentGroup, segments, outlet)) {
           return of (new UrlSegmentGroup([], {}));
