@@ -102,7 +102,7 @@ function advanceNode(node: TreeNode<ActivatedRoute>): void {
 
 function createState(config: Routes, url: string): RouterStateSnapshot {
   let res: RouterStateSnapshot;
-  recognize(RootComponent, config, tree(url), url).forEach(s => res = s);
+  recognize(RootComponent, config, tree(url), url).forEach(s => res = s.length > 0 ? s[0] : null);
   return res;
 }
 
