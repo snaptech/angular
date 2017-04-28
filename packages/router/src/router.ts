@@ -9,7 +9,7 @@
 import {Location} from '@angular/common';
 import {Compiler, Injector, NgModuleFactoryLoader, NgModuleRef, Type, isDevMode} from '@angular/core';
 import {BehaviorSubject, Observable, Subject, Subscription, of } from 'rxjs';
-import {concatMap, map, mergeMap} from 'rxjs/operators';
+import {concatMap, first, last, map, mergeMap, takeUntil} from 'rxjs/operators';
 
 import {applyRedirects} from './apply_redirects';
 import {LoadedRouterConfig, QueryParamsHandling, Route, Routes, standardizeConfig, validateConfig} from './config';
@@ -681,12 +681,13 @@ export class Router {
         urlAndSnapshot$ = redirectsApplied$.pipe(mergeMap((appliedUrl: UrlTree) => {
           return recognize(
                      this.rootComponentType, this.config, appliedUrl, this.serializeUrl(appliedUrl),
-                     this.paramsInheritanceStrategy, this.relativeLinkResolution)
+                     this.paramsInheritanceStrategy, this.relativeLinkResolution, true)
               .pipe(map((snapshot: any) => {
-                (this.events as Subject<Event>)
-                    .next(new RoutesRecognized(
-                        id, this.serializeUrl(url), this.serializeUrl(appliedUrl), snapshot));
-
+                if (snapshot != null) {
+                  (this.events as Subject<Event>)
+                      .next(new RoutesRecognized(
+                          id, this.serializeUrl(url), this.serializeUrl(appliedUrl), snapshot));
+                }
                 return {appliedUrl, snapshot};
               }));
         }));
@@ -694,91 +695,96 @@ export class Router {
         urlAndSnapshot$ = of ({appliedUrl: url, snapshot: precreatedState});
       }
 
-      const beforePreactivationDone$ =
-          urlAndSnapshot$.pipe(mergeMap((p): Observable<NavStreamValue> => {
-            if (typeof p === 'boolean') return of (p);
-            return this.hooks
-                .beforePreactivation(p.snapshot, {
-                  navigationId: id,
-                  appliedUrlTree: url,
-                  rawUrlTree: rawUrl, skipLocationChange, replaceUrl,
-                })
-                .pipe(map(() => p));
-          }));
+      const stopSearching = new Subject<boolean>();
+      const routerState$ = urlAndSnapshot$.pipe(
+          takeUntil(stopSearching),
+          concatMap(
+              (p: NavStreamValue):
+                  Observable<NavStreamValue> => {
+                    if (typeof p == 'boolean') return of (p);
 
-      // run preactivation: guards and data resolvers
-      let preActivation: PreActivation;
+                    if (p.snapshot == null) {
+                      stopSearching.next(true);
+                      p.shouldActivate = false;
+                      return of (p);
+                    }
 
-      const preactivationSetup$ = beforePreactivationDone$.pipe(map((p): NavStreamValue => {
-        if (typeof p === 'boolean') return p;
-        const {appliedUrl, snapshot} = p;
-        const moduleInjector = this.ngModule.injector;
-        preActivation = new PreActivation(
-            snapshot, this.routerState.snapshot, moduleInjector,
-            (evt: Event) => this.triggerEvent(evt));
-        preActivation.initialize(this.rootContexts);
-        return {appliedUrl, snapshot};
-      }));
+                    // run preactivation: guards and data resolvers
+                    let preActivation: PreActivation;
 
-      const preactivationCheckGuards$ =
-          preactivationSetup$.pipe(mergeMap((p): Observable<NavStreamValue> => {
-            if (typeof p === 'boolean' || this.navigationId !== id) return of (false);
-            const {appliedUrl, snapshot} = p;
+                    return this.hooks
+                        .beforePreactivation(p.snapshot, {
+                          navigationId: id,
+                          appliedUrlTree: url,
+                          rawUrlTree: rawUrl, skipLocationChange, replaceUrl,
+                        })
+                        .pipe(
+                            map(() => p), map((p: NavStreamValue): NavStreamValue => {
+                              if (typeof p !== 'boolean') {
+                                const moduleInjector = this.ngModule.injector;
+                                preActivation = new PreActivation(
+                                    p.snapshot, this.routerState.snapshot, moduleInjector,
+                                    (evt: Event) => this.triggerEvent(evt));
+                                preActivation.initialize(this.rootContexts);
+                              }
+                              return p;
+                            }), mergeMap((p: NavStreamValue): Observable<NavStreamValue> => {
+                              if (typeof p === 'boolean' || this.navigationId !== id)
+                                return of (false);
 
-            this.triggerEvent(new GuardsCheckStart(
-                id, this.serializeUrl(url), this.serializeUrl(appliedUrl), snapshot));
+                              this.triggerEvent(new GuardsCheckStart(
+                                  id, this.serializeUrl(url), this.serializeUrl(p.appliedUrl),
+                                  p.snapshot));
 
-            return preActivation.checkGuards().pipe(map((shouldActivate: boolean) => {
-              this.triggerEvent(new GuardsCheckEnd(
-                  id, this.serializeUrl(url), this.serializeUrl(appliedUrl), snapshot,
-                  shouldActivate));
-              return {appliedUrl: appliedUrl, snapshot: snapshot, shouldActivate: shouldActivate};
-            }));
-          }));
+                              return preActivation.checkGuards().pipe(
+                                  map((shouldActivate: boolean): NavStreamValue => {
+                                    p.shouldActivate = shouldActivate;
+                                    this.triggerEvent(new GuardsCheckEnd(
+                                        id, this.serializeUrl(url), this.serializeUrl(p.appliedUrl),
+                                        p.snapshot, p.shouldActivate));
+                                    return p;
+                                  }));
+                            }), mergeMap((p: NavStreamValue): Observable<NavStreamValue> => {
+                              if (typeof p === 'boolean' || this.navigationId !== id)
+                                return of (false);
 
-      const preactivationResolveData$ =
-          preactivationCheckGuards$.pipe(mergeMap((p): Observable<NavStreamValue> => {
-            if (typeof p === 'boolean' || this.navigationId !== id) return of (false);
-
-            if (p.shouldActivate && preActivation.isActivating()) {
-              this.triggerEvent(new ResolveStart(
-                  id, this.serializeUrl(url), this.serializeUrl(p.appliedUrl), p.snapshot));
-              return preActivation.resolveData(this.paramsInheritanceStrategy).pipe(map(() => {
-                this.triggerEvent(new ResolveEnd(
-                    id, this.serializeUrl(url), this.serializeUrl(p.appliedUrl), p.snapshot));
-                return p;
-              }));
+                              if (p.shouldActivate && preActivation.isActivating()) {
+                                this.triggerEvent(new ResolveStart(
+                                    id, this.serializeUrl(url), this.serializeUrl(p.appliedUrl),
+                                    p.snapshot));
+                                return preActivation.resolveData(this.paramsInheritanceStrategy)
+                                    .pipe(map(() => {
+                                      this.triggerEvent(new ResolveEnd(
+                                          id, this.serializeUrl(url),
+                                          this.serializeUrl(p.appliedUrl), p.snapshot));
+                                      return p;
+                                    }));
+                              } else {
+                                return of (p);
+                              }
+                            }), mergeMap((p: NavStreamValue): Observable<NavStreamValue> => {
+                              if (typeof p === 'boolean' || this.navigationId !== id)
+                                return of (false);
+                              return this.hooks
+                                  .afterPreactivation(p.snapshot, {
+                                    navigationId: id,
+                                    appliedUrlTree: url,
+                                    rawUrlTree: rawUrl, skipLocationChange, replaceUrl,
+                                  })
+                                  .pipe(map(() => p));
+                            }));
+                  }),
+          first((p: any) => p.shouldActivate, <any>{snapshot: null, shouldActivate: false}),
+          map((p: NavStreamValue): any => {
+            if (typeof p === 'boolean' || this.navigationId !== id) return false;
+            if (p.shouldActivate) {
+              const state =
+                  createRouterState(this.routeReuseStrategy, p.snapshot, this.routerState);
+              return {appliedUrl: p.appliedUrl, state, shouldActivate: p.shouldActivate};
             } else {
-              return of (p);
+              return {appliedUrl: p.appliedUrl, state: null, shouldActivate: p.shouldActivate};
             }
           }));
-
-      const preactivationDone$ =
-          preactivationResolveData$.pipe(mergeMap((p): Observable<NavStreamValue> => {
-            if (typeof p === 'boolean' || this.navigationId !== id) return of (false);
-            return this.hooks
-                .afterPreactivation(p.snapshot, {
-                  navigationId: id,
-                  appliedUrlTree: url,
-                  rawUrlTree: rawUrl, skipLocationChange, replaceUrl,
-                })
-                .pipe(map(() => p));
-          }));
-
-
-      // create router state
-      // this operation has side effects => route state is being affected
-      const routerState$ = preactivationDone$.pipe(map((p) => {
-        if (typeof p === 'boolean' || this.navigationId !== id) return false;
-        const {appliedUrl, snapshot, shouldActivate} = p;
-        if (shouldActivate) {
-          const state = createRouterState(this.routeReuseStrategy, snapshot, this.routerState);
-          return {appliedUrl, state, shouldActivate};
-        } else {
-          return {appliedUrl, state: null, shouldActivate};
-        }
-      }));
-
 
       this.activateRoutes(
           routerState$, this.routerState, this.currentUrlTree, id, url, rawUrl, skipLocationChange,
