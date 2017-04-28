@@ -7,7 +7,7 @@
  */
 
 import {Type} from '@angular/core';
-import {Observable, Observer, of } from 'rxjs';
+import {Observable, Observer, from, of } from 'rxjs';
 
 import {Data, ResolveData, Route, Routes} from './config';
 import {ActivatedRouteSnapshot, ParamsInheritanceStrategy, RouterStateSnapshot, inheritedParamsDataResolve} from './router_state';
@@ -20,10 +20,10 @@ class NoMatch {}
 
 export function recognize(
     rootComponentType: Type<any>| null, config: Routes, urlTree: UrlTree, url: string,
-    paramsInheritanceStrategy: ParamsInheritanceStrategy =
-        'emptyOnly'): Observable<RouterStateSnapshot> {
+    paramsInheritanceStrategy: ParamsInheritanceStrategy = 'emptyOnly',
+    nullTerminated: boolean = false): Observable<RouterStateSnapshot> {
   return new Recognizer(rootComponentType, config, urlTree, url, paramsInheritanceStrategy)
-      .recognize();
+      .recognize(nullTerminated);
 }
 
 class Recognizer {
@@ -31,22 +31,50 @@ class Recognizer {
       private rootComponentType: Type<any>|null, private config: Routes, private urlTree: UrlTree,
       private url: string, private paramsInheritanceStrategy: ParamsInheritanceStrategy) {}
 
-  recognize(): Observable<RouterStateSnapshot> {
+  recognize(nullTerminated: boolean = false): Observable<RouterStateSnapshot> {
     try {
-      const rootSegmentGroup = split(this.urlTree.root, [], [], this.config).segmentGroup;
+      let recognizedRoutes: RouterStateSnapshot[] = [];
+      let alreadyRecognized: number[][] = [];
+      for (let i = 0; i < (this.config.length || 1); i++) {
+        try {
+          if (alreadyRecognized.length > 0) {
+            alreadyRecognized[0] = alreadyRecognized[0].concat(alreadyRecognized[1]);
+            alreadyRecognized[1] = [];
+          } else
+            alreadyRecognized = alreadyRecognized.concat([[], []]);
+          const rootSegmentGroup = split(this.urlTree.root, [], [], this.config).segmentGroup;
 
-      const children = this.processSegmentGroup(this.config, rootSegmentGroup, PRIMARY_OUTLET);
+          const children = this.processSegmentGroup(
+              this.config, rootSegmentGroup, PRIMARY_OUTLET, alreadyRecognized);
 
-      const root = new ActivatedRouteSnapshot(
-          [], Object.freeze({}), Object.freeze({...this.urlTree.queryParams}),
-          this.urlTree.fragment !, {}, PRIMARY_OUTLET, this.rootComponentType, null,
-          this.urlTree.root, -1, {});
+          const root = new ActivatedRouteSnapshot(
+              [], Object.freeze({}), Object.freeze({...this.urlTree.queryParams}),
+              this.urlTree.fragment !, {}, PRIMARY_OUTLET, this.rootComponentType, null,
+              this.urlTree.root, -1, {});
 
-      const rootNode = new TreeNode<ActivatedRouteSnapshot>(root, children);
-      const routeState = new RouterStateSnapshot(this.url, rootNode);
-      this.inheritParamsAndData(routeState._root);
-      return of (routeState);
-
+          const rootNode = new TreeNode<ActivatedRouteSnapshot>(root, children);
+          const routeState = new RouterStateSnapshot(this.url, rootNode);
+          this.inheritParamsAndData(routeState._root);
+          recognizedRoutes.push(routeState);
+        } catch (e) {
+          if (!(e instanceof NoMatch))
+            throw e;
+          else
+            break;
+        }
+      }
+      if (recognizedRoutes.length == 0) {
+        if (nullTerminated) {
+          return of (<any>null);
+        } else {
+          return of ();
+        }
+      } else {
+        if (nullTerminated) {
+          recognizedRoutes.push(<any>null);
+        }
+        return from(recognizedRoutes);
+      }
     } catch (e) {
       return new Observable<RouterStateSnapshot>(
           (obs: Observer<RouterStateSnapshot>) => obs.error(e));
@@ -63,30 +91,37 @@ class Recognizer {
     routeNode.children.forEach(n => this.inheritParamsAndData(n));
   }
 
-  processSegmentGroup(config: Route[], segmentGroup: UrlSegmentGroup, outlet: string):
-      TreeNode<ActivatedRouteSnapshot>[] {
+  processSegmentGroup(
+      config: Route[], segmentGroup: UrlSegmentGroup, outlet: string,
+      alreadyRecognized: number[][]): TreeNode<ActivatedRouteSnapshot>[] {
     if (segmentGroup.segments.length === 0 && segmentGroup.hasChildren()) {
-      return this.processChildren(config, segmentGroup);
+      return this.processChildren(config, segmentGroup, alreadyRecognized);
     }
 
-    return this.processSegment(config, segmentGroup, segmentGroup.segments, outlet);
+    return this.processSegment(
+        config, segmentGroup, segmentGroup.segments, outlet, alreadyRecognized);
   }
 
-  processChildren(config: Route[], segmentGroup: UrlSegmentGroup):
+  processChildren(config: Route[], segmentGroup: UrlSegmentGroup, alreadyRecognized: number[][]):
       TreeNode<ActivatedRouteSnapshot>[] {
     const children = mapChildrenIntoArray(
-        segmentGroup, (child, childOutlet) => this.processSegmentGroup(config, child, childOutlet));
+        segmentGroup, (child, childOutlet) =>
+                          this.processSegmentGroup(config, child, childOutlet, alreadyRecognized));
     checkOutletNameUniqueness(children);
     sortActivatedRouteSnapshots(children);
     return children;
   }
 
   processSegment(
-      config: Route[], segmentGroup: UrlSegmentGroup, segments: UrlSegment[],
-      outlet: string): TreeNode<ActivatedRouteSnapshot>[] {
-    for (const r of config) {
+      config: Route[], segmentGroup: UrlSegmentGroup, segments: UrlSegment[], outlet: string,
+      alreadyRecognized: number[][]): TreeNode<ActivatedRouteSnapshot>[] {
+    for (let i = 0; i < config.length; i++) {
       try {
-        return this.processSegmentAgainstRoute(r, segmentGroup, segments, outlet);
+        if (alreadyRecognized[0].some(x => x == i)) continue;
+        const recognizedRoute = this.processSegmentAgainstRoute(
+            config[i], segmentGroup, segments, outlet, alreadyRecognized);
+        alreadyRecognized[1].push(i);
+        return recognizedRoute;
       } catch (e) {
         if (!(e instanceof NoMatch)) throw e;
       }
@@ -104,8 +139,8 @@ class Recognizer {
   }
 
   processSegmentAgainstRoute(
-      route: Route, rawSegment: UrlSegmentGroup, segments: UrlSegment[],
-      outlet: string): TreeNode<ActivatedRouteSnapshot>[] {
+      route: Route, rawSegment: UrlSegmentGroup, segments: UrlSegment[], outlet: string,
+      alreadyRecognized: number[][]): TreeNode<ActivatedRouteSnapshot>[] {
     if (route.redirectTo) throw new NoMatch();
 
     if ((route.outlet || PRIMARY_OUTLET) !== outlet) throw new NoMatch();
@@ -137,8 +172,9 @@ class Recognizer {
     const {segmentGroup, slicedSegments} =
         split(rawSegment, consumedSegments, rawSlicedSegments, childConfig);
 
+    let childrenAlreadyRecognized: number[][] = [[], []];
     if (slicedSegments.length === 0 && segmentGroup.hasChildren()) {
-      const children = this.processChildren(childConfig, segmentGroup);
+      const children = this.processChildren(childConfig, segmentGroup, childrenAlreadyRecognized);
       return [new TreeNode<ActivatedRouteSnapshot>(snapshot, children)];
     }
 
@@ -146,7 +182,8 @@ class Recognizer {
       return [new TreeNode<ActivatedRouteSnapshot>(snapshot, [])];
     }
 
-    const children = this.processSegment(childConfig, segmentGroup, slicedSegments, PRIMARY_OUTLET);
+    const children = this.processSegment(
+        childConfig, segmentGroup, slicedSegments, PRIMARY_OUTLET, childrenAlreadyRecognized);
     return [new TreeNode<ActivatedRouteSnapshot>(snapshot, children)];
   }
 }
