@@ -622,57 +622,54 @@ export class Router {
       const stopSearching = new Subject<boolean>();
       const takeUntilFound$ = takeUntil.call(urlAndSnapshot$, stopSearching);
       const guardPredicate$ = concatMap.call(takeUntilFound$, (p:any) => {
-        try {
-          if (p.snapshot == null) {
-            stopSearching.next(true);
-            return of(<any>{appliedUrl: null, snapshot: null, shouldActivate: false});
-          }
+        if (p.snapshot == null) {
+          stopSearching.next(true);
+          return of(<any>{appliedUrl: null, snapshot: null, shouldActivate: false});
+        }
 
-          const beforePreactivationDone$ = map.call(this.hooks.beforePreactivation(p.snapshot), () => p);
+        const beforePreactivationDone$ = map.call(this.hooks.beforePreactivation(p.snapshot), () => p);
 
-          // run preactivation: guards and data resolvers
-          let preActivation: PreActivation;
+        // run preactivation: guards and data resolvers
+        let preActivation: PreActivation;
 
-          const preactivationTraverse$ = map.call(
-            beforePreactivationDone$,
-            ({appliedUrl, snapshot}: { appliedUrl: string, snapshot: RouterStateSnapshot }) => {
-              const moduleInjector = this.ngModule.injector;
-              preActivation =
-                new PreActivation(snapshot, this.currentRouterState.snapshot, moduleInjector);
-              preActivation.traverse(this.rootContexts);
-              return {appliedUrl, snapshot};
-            });
+        const preactivationTraverse$ = map.call(
+          beforePreactivationDone$,
+          ({appliedUrl, snapshot}: { appliedUrl: string, snapshot: RouterStateSnapshot }) => {
+            const moduleInjector = this.ngModule.injector;
+            preActivation =
+              new PreActivation(snapshot, this.currentRouterState.snapshot, moduleInjector);
+            preActivation.traverse(this.rootContexts);
+            return {appliedUrl, snapshot};
+          });
 
-          const preactivationCheckGuards$ = mergeMap.call(
-            preactivationTraverse$,
-            ({appliedUrl, snapshot}: { appliedUrl: string, snapshot: RouterStateSnapshot }) => {
-              if (this.navigationId !== id) return of(false);
-
-              return map.call(preActivation.checkGuards(), (shouldActivate: boolean) => {
-                return {appliedUrl: appliedUrl, snapshot: snapshot, shouldActivate: shouldActivate};
-              });
-            });
-
-          const preactivationResolveData$ = mergeMap.call(preactivationCheckGuards$, (p: any) => {
+        const preactivationCheckGuards$ = mergeMap.call(
+          preactivationTraverse$,
+          ({appliedUrl, snapshot}: { appliedUrl: string, snapshot: RouterStateSnapshot }) => {
             if (this.navigationId !== id) return of(false);
 
-            if (p.shouldActivate) {
-              return map.call(preActivation.resolveData(), () => p);
-            } else {
-              return of(p);
-            }
-          });
-
-          const preactivationDone$ = mergeMap.call(preactivationResolveData$, (p: any) => {
-            return map.call(this.hooks.afterPreactivation(p.snapshot), () => {
-              if (p.shouldActivate)
-                stopSearching.next(true);
-              return p;
+            return map.call(preActivation.checkGuards(), (shouldActivate: boolean) => {
+              return {appliedUrl: appliedUrl, snapshot: snapshot, shouldActivate: shouldActivate};
             });
           });
-          return preactivationDone$;
-        }
-        catch(err) { console.error(err); }
+
+        const preactivationResolveData$ = mergeMap.call(preactivationCheckGuards$, (p: any) => {
+          if (this.navigationId !== id) return of(false);
+
+          if (p.shouldActivate) {
+            return map.call(preActivation.resolveData(), () => p);
+          } else {
+            return of(p);
+          }
+        });
+
+        const preactivationDone$ = mergeMap.call(preactivationResolveData$, (p: any) => {
+          return map.call(this.hooks.afterPreactivation(p.snapshot), () => {
+            if (p.shouldActivate)
+              stopSearching.next(true);
+            return p;
+          });
+        });
+        return preactivationDone$;
       });
 
       const foundOrDefaultRoute$ =
