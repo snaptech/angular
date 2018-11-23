@@ -8,7 +8,7 @@
 
 import {Injector, NgModuleRef} from '@angular/core';
 import {EmptyError, Observable, Observer, from, of } from 'rxjs';
-import {catchError, concatAll, every, first, map, mergeMap} from 'rxjs/operators';
+import {catchError, concatAll, every, first, last, map, mergeMap} from 'rxjs/operators';
 
 import {LoadedRouterConfig, Route, Routes} from './config';
 import {CanLoadFn} from './interfaces';
@@ -144,7 +144,7 @@ class ApplyRedirects {
       ngModule: NgModuleRef<any>, segmentGroup: UrlSegmentGroup, routes: Route[],
       segments: UrlSegment[], outlet: string,
       allowRedirects: boolean): Observable<UrlSegmentGroup> {
-    return of (...routes).pipe(
+    const route$ = of (...routes).pipe(
         map((r: any) => {
           const expanded$ = this.expandSegmentAgainstRoute(
               ngModule, segmentGroup, routes, r, segments, outlet, allowRedirects);
@@ -157,7 +157,11 @@ class ApplyRedirects {
             throw e;
           }));
         }),
-        concatAll(), first((s: any) => !!s), catchError((e: any, _: any) => {
+        concatAll());
+    const first$: any = route$.pipe(first((s: any) => !!s));
+    return route$.pipe(
+        last((s: any) => !!s), mergeMap(() => first$, 1), first<UrlSegmentGroup>(),
+        catchError((e: any, _: any) => {
           if (e instanceof EmptyError || e.name === 'EmptyError') {
             if (this.noLeftoversInUrl(segmentGroup, segments, outlet)) {
               return of (new UrlSegmentGroup([], {}));
